@@ -7,6 +7,7 @@ from itertools import groupby
 import hashlib
 from datetime import datetime, timedelta
 import os
+import re
 
 
 # 喜马拉雅极速版
@@ -14,14 +15,16 @@ import os
 
 ###################################################
 # 对应方案2: 下载到本地,需要此处填写
-cookies1 = ""  
-cookies2 = "" 
+cookies1 = ""
+cookies2 = ""
 
-cookiesList = [cookies1,]   # 多账号准备
+cookiesList = [cookies1, ]   # 多账号准备
 
 # 通知服务
 BARK = ''                   # bark服务,自行搜索; secrets可填;形如jfjqxDx3xxxxxxxxSaK的字符串
 SCKEY = ''                  # Server酱的SCKEY; secrets可填
+TG_BOT_TOKEN = ''           # telegram bot token 自行申请
+TG_USER_ID = ''             # telegram 用户ID
 
 ###################################################
 # 对应方案1:  GitHub action自动运行,此处无需填写;
@@ -43,11 +46,16 @@ if "XMLY_SPEED_COOKIE" in os.environ:
     if "SCKEY" in os.environ and os.environ["SCKEY"]:
         BARK = os.environ["SCKEY"]
         print("serverJ 推送打开")
+    if "TG_BOT_TOKEN" in os.environ and os.environ["TG_BOT_TOKEN"] and "TG_USER_ID" in os.environ and os.environ["TG_USER_ID"]:
+        TG_BOT_TOKEN = os.environ["TG_BOT_TOKEN"]
+        TG_USER_ID = os.environ["TG_USER_ID"]
+        print("Telegram 推送打开")
 
 
 ###################################################
-#可选项
-devices = []                                # 自定义设备命名,非必须 ;devices=["iPhone7P","huawei"];与cookiesList对应
+# 可选项
+# 自定义设备命名,非必须 ;devices=["iPhone7P","huawei"];与cookiesList对应
+devices = []
 notify_time = 19                            # 通知时间,24小时制,默认19
 XMLY_ACCUMULATE_TIME = 1                    # 希望刷时长的,此处置1,默认打开;关闭置0
 UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 iting/1.0.12 kdtunion_iting/1.0 iting(main)/1.0.12/ios_1"
@@ -67,7 +75,11 @@ def str2dict(str_cookie):
             dict_cookie[j[0].strip()] = j[1].strip()
 
         assert dict_cookie["1&_token"].split("&")[0]
-        assert dict_cookie['device_model']
+        regex = r"&\d\.\d\.\d+"
+        appid = "&1.0.12"
+        dict_cookie["1&_device"] = re.sub(
+            regex, appid, dict_cookie["1&_device"], 0, re.MULTILINE)
+        print(dict_cookie["1&_device"])
 
     except (IndexError, KeyError):
         print("cookie填写出错 ❌,仔细查看说明")
@@ -131,12 +143,11 @@ def read(cookies):
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
     result = response.json()
-    # print(result)
     if result["status"] == -2:
         # print("无法阅读,尝试从安卓端手动开启")
         return
     # print(result["completeList"])
-    if result["isComplete"]:
+    if result["isComplete"] or result["count_finish"] == 9:
         print("今日完成阅读")
         return
     headers = {
@@ -162,7 +173,7 @@ def read(cookies):
             'https://51gzdhh.xyz/new/userCompleteNew', headers=headers, params=params)
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
-        return
+        return 0
     result = response.json()
     print(result)
 
@@ -189,10 +200,51 @@ def ans_receive(cookies, paperId, lastTopicId, receiveType):
                                  headers=headers, cookies=cookies, data=json.dumps(data))
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
+        return 0
+    return response.json()
+
+def stage(cookies):
+    # 新手任务
+    headers = {
+        'Host': 'm.ximalaya.com',
+        'Accept': 'application/json, text/plain, */*',
+        'Connection': 'keep-alive',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 iting/2.0.9 kdtunion_iting/1.0 iting(main)/2.0.9/ios_1',
+        'Accept-Language': 'zh-cn',
+        'Referer': 'https://m.ximalaya.com/growth-ssr-speed-welfare-center/page/welfare',
+        'Accept-Encoding': 'gzip, deflate, br',
+    }
+    try:
+        response = requests.get(
+            'https://m.ximalaya.com/speed/web-earn/task/stage-rewards-daily', headers=headers, cookies=cookies)
+    except:
+        print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
-    print(response.text)
-
-
+    data = response.json()["data"]
+    if not data:
+        return
+    stageRewards = data["stageRewards"]
+    for k, v in enumerate(stageRewards, 1):
+        print(k, v)
+        if v["status"] == 1:
+            headers = {
+                'Host': 'm.ximalaya.com',
+                'Content-Type': 'application/json',
+                'Accept': '*/*',
+                'Connection': 'keep-alive',
+                'User-Agent': 'ting_v2.0.9_c5(CFNetwork, iOS 14.3, iPhone9,2)',
+                'Accept-Language': 'zh-Hans-CN;q=1, en-CN;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'X-Requested-With': 'XMLHttpRequest',
+            }
+            params = (('stage', f'{k}'),)
+            try:
+                response = requests.get('https://m.ximalaya.com/speed/web-earn/task/stage-reward/receive',
+                                        headers=headers, params=params, cookies=cookies)
+            except:
+                print("网络请求异常,为避免GitHub action报错,直接跳过")
+                return
+            print(response.text)
 def ans_restore(cookies):
     headers = {
         'User-Agent': UserAgent,
@@ -212,8 +264,11 @@ def ans_restore(cookies):
                                  headers=headers, cookies=cookies, data=json.dumps(data))
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
-        return
-    print(response.text)
+        return 0
+    result = response.json()
+    if "errorCode" in result:
+        return 0
+    return 1
 
 
 def ans_getTimes(cookies):
@@ -232,8 +287,9 @@ def ans_getTimes(cookies):
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return {"stamina": 0,
-            "remainingTimes": 0}
-    result = json.loads(response.text)
+                "remainingTimes": 0}
+    print(response.text)
+    result = response.json()
     stamina = result["data"]["stamina"]
     remainingTimes = result["data"]["remainingTimes"]
     return {"stamina": stamina,
@@ -255,13 +311,19 @@ def ans_start(cookies):
             'https://m.ximalaya.com/speed/web-earn/topic/start', headers=headers, cookies=cookies)
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
-        return
-    result = json.loads(response.text)
-    paperId = result["data"]["paperId"]
-    dateStr = result["data"]["dateStr"]
-    lastTopicId = result["data"]["topics"][2]["topicId"]
-    print(paperId, dateStr, lastTopicId)
-    return paperId, dateStr, lastTopicId
+        return 0, 0, 0
+    # print(response.text)
+    result = response.json()
+
+    try:
+        paperId = result["data"]["paperId"]
+        dateStr = result["data"]["dateStr"]
+        lastTopicId = result["data"]["topics"][2]["topicId"]
+        print(paperId, dateStr, lastTopicId)
+        return paperId, dateStr, lastTopicId
+    except:
+        print("❌1 重新抓包 2 手动答题")
+        return 0, 0, 0
 
 
 def _str2key(s):
@@ -350,7 +412,7 @@ def index_baoxiang_award(cookies):
     currentTimeMillis = int(time.time()*1000)-2
     try:
         response = requests.post('https://mobile.ximalaya.com/pizza-category/activity/getAward?activtyId=baoxiangAward',
-                             headers=headers, cookies=cookies)
+                                 headers=headers, cookies=cookies)
     except:
         return
     result = response.json()
@@ -510,7 +572,7 @@ def bubble(cookies):
         'Referer': 'https://m.ximalaya.com/xmds-node-spa/apps/speed-growth-open-components/bubble',
     }
     uid = get_uid(cookies)
-    data = {"listenTime": "41246", "signature": "2b1cc9ee020db596d28831cff8874d9c",
+    data = {"listenTime": "41246", "signature": "2b1cc9e8831cff8874d9c",
             "currentTimeMillis": "1596695606145", "uid": uid, "expire": False}
     try:
         response = requests.post('https://m.ximalaya.com/speed/web-earn/listen/bubbles',
@@ -519,12 +581,18 @@ def bubble(cookies):
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
     result = response.json()
+    # print(result)
+
     if not result["data"]["effectiveBubbles"]:
         print("暂无有效气泡")
         return
     for i in result["data"]["effectiveBubbles"]:
         print(i["id"])
-        receive(cookies, i["id"])
+
+        tmp = receive(cookies, i["id"])
+        if "errorCode" in tmp:
+            print("❌ 每天手动收听一段时间，暂无其他方法")
+            return
         time.sleep(1)
         ad_score(cookies, 7, i["id"])
     for i in result["data"]["expiredBubbles"]:
@@ -548,6 +616,7 @@ def receive(cookies, taskId):
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
     print("receive: ", response.text)
+    return response.json()
 
 
 def getOmnipotentCard(cookies, mins, date_stamp, _datatime):
@@ -605,8 +674,11 @@ def cardReportTime(cookies, mins, date_stamp, _datatime):
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
-    if response["data"]["upperLimit"]:
+    try:
+        response["data"]["upperLimit"]
         print("今日已达上限")
+    except:
+        return
 
 
 def account(cookies):
@@ -649,19 +721,38 @@ def answer(cookies):
         print("时间未到")
     for _ in range(ans_times["stamina"]):
         paperId, _, lastTopicId = ans_start(cookies)
-        ans_receive(cookies, paperId, lastTopicId, 1)
+        if paperId == 0:
+            return
+        tmp = ans_receive(cookies, paperId, lastTopicId, 1)
+        print(tmp)
+        if "errorCode" in tmp:
+            print("❌ 每天手动收听一段时间，暂无其他方法")
+            return
         time.sleep(1)
-        ans_receive(cookies, paperId, lastTopicId, 2)
+        tmp = ans_receive(cookies, paperId, lastTopicId, 2)
+        print(tmp)
+        if tmp == 0:
+            return
         time.sleep(1)
 
     if ans_times["remainingTimes"] > 0:
         print("[看视频回复体力]")
-        ans_restore(cookies)
+        if ans_restore(cookies) == 0:
+            return
         for _ in range(5):
             paperId, _, lastTopicId = ans_start(cookies)
-            ans_receive(cookies, paperId, lastTopicId, 1)
+            if paperId == 0:
+                return
+            tmp = ans_receive(cookies, paperId, lastTopicId, 1)
+            print(tmp)
+            if "errorCode" in tmp:
+                print("❌ 每天手动收听一段时间，暂无其他方法")
+                return
             time.sleep(1)
-            ans_receive(cookies, paperId, lastTopicId, 2)
+            tmp = ans_receive(cookies, paperId, lastTopicId, 2)
+            print(tmp)
+            if tmp == 0:
+                return
             time.sleep(1)
 
 
@@ -687,12 +778,12 @@ def saveListenTime(cookies, date_stamp):
         'uid': uid
     }
     try:
-        requests.post('http://mobile.ximalaya.com/pizza-category/ball/saveListenTime',
-                      headers=headers, cookies=cookies, data=data)
+        response = requests.post('http://mobile.ximalaya.com/pizza-category/ball/saveListenTime',
+                                 headers=headers, cookies=cookies, data=data)
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
-    # print(response.text)
+    print(response.text)
 
 
 def listenData(cookies, date_stamp):
@@ -715,12 +806,12 @@ def listenData(cookies, date_stamp):
         'uid': uid
     }
     try:
-        requests.post('http://m.ximalaya.com/speed/web-earn/listen/client/data',
-                      headers=headers, cookies=cookies, data=json.dumps(data))
+        response = requests.post('http://m.ximalaya.com/speed/web-earn/listen/client/data',
+                                 headers=headers, cookies=cookies, data=json.dumps(data))
     except:
         print("网络请求异常,为避免GitHub action报错,直接跳过")
         return
-    # print(response.text)
+    print(response.text)
 
 
 def card_exchangeCoin(cookies, themeId, cardIdList, _datatime):
@@ -848,7 +939,7 @@ def card(cookies, _datatime):
     }
     try:
         response = requests.get(
-        'https://m.ximalaya.com/speed/web-earn/card/userCardInfo', headers=headers, cookies=cookies)
+            'https://m.ximalaya.com/speed/web-earn/card/userCardInfo', headers=headers, cookies=cookies)
     except:
         return
     data = response.json()["data"]
@@ -893,6 +984,7 @@ def card(cookies, _datatime):
 def get_uid(cookies):
     return cookies["1&_token"].split("&")[0]
 
+
 def serverJ(title, content):
     print("\n")
     sckey = SCKEY
@@ -908,10 +1000,11 @@ def serverJ(title, content):
     print("serverJ服务启动")
     data = {
         "text": title,
-        "desp": content.replace("\n","\n\n")+"\n\n [打赏作者](https://github.com/Zero-S1/xmly_speed/blob/master/thanks.md)"
+        "desp": content.replace("\n", "\n\n")+"\n\n [打赏作者](https://github.com/Zero-S1/xmly_speed/blob/master/thanks.md)"
     }
     response = requests.post(f"https://sc.ftqq.com/{sckey}.send", data=data)
     print(response.text)
+
 
 def bark(title, content):
     print("\n")
@@ -927,6 +1020,24 @@ def bark(title, content):
     print(response.text)
 
 
+def telegram_bot(title, content):
+    print("\n")
+    tg_bot_token = TG_BOT_TOKEN
+    tg_user_id = TG_USER_ID
+    if "TG_BOT_TOKEN" in os.environ and "TG_USER_ID" in os.environ:
+        tg_bot_token = os.environ["TG_BOT_TOKEN"]
+        tg_user_id = os.environ["TG_USER_ID"]
+    if not tg_bot_token or not tg_user_id:
+        print("Telegram推送的tg_bot_token或者tg_user_id未设置!!\n取消推送")
+        return
+    print("Telegram 推送开始")
+    send_data = {"chat_id": tg_user_id, "text": title +
+                 '\n\n'+content, "disable_web_page_preview": "true"}
+    response = requests.post(
+        url='https://api.telegram.org/bot%s/sendMessage' % (tg_bot_token), data=send_data)
+    print(response.text)
+
+
 def run():
     print(f"喜马拉雅极速版 (https://github.com/Zero-S1/xmly_speed/blob/master/xmly_speed.md ) ,欢迎打赏¯\(°_o)/¯")
     mins, date_stamp, _datatime, _notify_time = get_time()
@@ -937,8 +1048,10 @@ def run():
         if XMLY_ACCUMULATE_TIME == 1:
             saveListenTime(cookies, date_stamp)
             listenData(cookies, date_stamp)
+        stage(cookies)
         read(cookies)  # 阅读
         bubble(cookies)  # 收金币气泡
+        # continue
         continuousDays = checkin(cookies, _datatime)  # 自动签到
         # lottery_info(cookies)  # 大转盘4次
         answer(cookies)      # 答题赚金币
@@ -960,16 +1073,17 @@ def run():
         print("###"*20)
         print("\n"*4)
     if _notify_time.split()[0] == str(notify_time) and int(_notify_time.split()[1]) > 30:
-    # if 1:
-        message=''
+        # if 1:
+        message = ''
         for i in table:
             message += f"[{i[0].replace(' ',''):<9}]: {i[1]:<6.2f} (＋{i[2]:<4.2f}) {i[3]:<7.2f} {i[4]}\\30\n"
         message += "⭕tips:第30天需要手动签到 by zero_s1, (*^_^*)欢迎打赏 "
-        if len(table)<=4:
-            message="【设备】| 当前剩余 | 今天| 历史| 连续签到\n"+message
-        
+        if len(table) <= 4:
+            message = "【设备】| 当前剩余 | 今天| 历史| 连续签到\n"+message
+
         bark("⏰ 喜马拉雅极速版", message)
         serverJ("⏰ 喜马拉雅极速版", message)
+        telegram_bot("⏰ 喜马拉雅极速版", message)
 
 
 if __name__ == "__main__":
